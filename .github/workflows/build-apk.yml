@@ -43,7 +43,20 @@ jobs:
 
       - name: Build APK
         working-directory: project
-        run: gradle assembleDebug --no-daemon --stacktrace
+        run: |
+          cat > /tmp/kotlin-fix.gradle <<'EOF'
+          allprojects {
+          configurations.configureEach {
+          resolutionStrategy.eachDependency { details ->
+          if (details.requested.group == "org.jetbrains.kotlin" &&
+              details.requested.name in ["kotlin-stdlib", "kotlin-stdlib-jdk7", "kotlin-stdlib-jdk8"]) {
+           details.useVersion("1.8.22")
+           }
+           }
+           }
+           }
+           EOF
+             gradle assembleDebug --no-daemon --stacktrace --init-script /tmp/kotlin-fix.gradle
 
       - name: Find APK
         run: |
