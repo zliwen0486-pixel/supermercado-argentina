@@ -62,8 +62,14 @@ jobs:
         run: |
           find project -type f -name '*.apk' -print
 
+      - name: Prepare APK
+        run: |
+          APK=$(find project -type f -name "*.apk" | head -n 1)
+          echo "Found APK: $APK"
+          cp "$APK" project/Supermercado-Argentina.apk
+    
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Supermercado-Argentina-APK
-          path: project/**/build/outputs/apk/debug/*.apk
+         name: Supermercado-Argentina-APK
+         path: project/Supermercado-Argentina.apk
