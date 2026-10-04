@@ -23,57 +23,115 @@ jobs:
 
       - name: Find Android project ZIP
         run: |
+          set -e
+
           ZIP=$(find . -maxdepth 1 -type f -name '*.zip' | head -n 1)
+
           if [ -z "$ZIP" ]; then
             echo "没有找到 Android APP ZIP 文件"
             exit 1
           fi
-          echo "找到: $ZIP"
+
+          echo "找到 ZIP: $ZIP"
+
+          rm -rf project
           mkdir -p project
           unzip -o "$ZIP" -d project
 
-      - name: Show project files
+      - name: Locate Android project
         run: |
-          find project -maxdepth 4 -type f | head -100
+          set -e
+
+          echo "=== 查找 Android 项目 ==="
+
+          ROOT=$(find project -type f \
+            \( -name 'gradlew' -o -name 'settings.gradle' -o -name 'settings.gradle.kts' \) \
+            -print -quit | xargs -r dirname)
+
+          if [ -z "$ROOT" ]; then
+            echo "没有找到 Gradle Android 项目"
+            echo "=== 项目文件 ==="
+            find project -maxdepth 6 -type f | head -200
+            exit 1
+          fi
+
+          echo "Android 项目目录: $ROOT"
+
+          echo "ANDROID_PROJECT_ROOT=$ROOT" >> "$GITHUB_ENV"
+
+          echo "=== 项目文件 ==="
+          find "$ROOT" -maxdepth 3 -type f | head -100
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
 
-      - name: Build APK
-        working-directory: project
+      - name: Create Kotlin compatibility fix
         run: |
           cat > /tmp/kotlin-fix.gradle <<'EOF'
           allprojects {
-          configurations.configureEach {
-          resolutionStrategy.eachDependency { details ->
-          if (details.requested.group == "org.jetbrains.kotlin" &&
-              details.requested.name in ["kotlin-stdlib", "kotlin-stdlib-jdk7", "kotlin-stdlib-jdk8"]) {
-           details.useVersion("1.8.22")
-           gradle assembleDebug --no-daemon --stacktrace --init-script /tmp/kotlin-fix.gradle
-             echo "=== APK FILES ==="
-             find . -type f \( -name "*.apk" -o -name "*.aab" \) -print
-             echo "=== ALL BUILD DIRECTORIES ==="
-            find . -type d -name build -print
-           }
-           }
-           }
-           }
-           EOF
-             
-      - name: Find APK
+              configurations.configureEach {
+                  resolutionStrategy.eachDependency { details ->
+                      if (details.requested.group == "org.jetbrains.kotlin" &&
+                          details.requested.name in [
+                              "kotlin-stdlib",
+                              "kotlin-stdlib-jdk7",
+                              "kotlin-stdlib-jdk8"
+                          ]) {
+                          details.useVersion("1.8.22")
+                      }
+                  }
+              }
+          }
+          EOF
+
+      - name: Build APK
+        working-directory: ${{ env.ANDROID_PROJECT_ROOT }}
         run: |
-          find project -type f -name '*.apk' -print
+          set -e
+
+          if [ -f "./gradlew" ]; then
+            chmod +x ./gradlew
+            ./gradlew assembleDebug \
+              --no-daemon \
+              --stacktrace \
+              --init-script /tmp/kotlin-fix.gradle
+          else
+            gradle assembleDebug \
+              --no-daemon \
+              --stacktrace \
+              --init-script /tmp/kotlin-fix.gradle
+          fi
+
+          echo "=== APK FILES ==="
+          find . -type f -name '*.apk' -print
 
       - name: Prepare APK
         run: |
-          APK=$(find project -type f -name "*.apk" | head -n 1)
-          echo "Found APK: $APK"
-          cp "$APK" project/Supermercado-Argentina.apk
-    
+          set -e
+
+          APK=$(find "$ANDROID_PROJECT_ROOT" -type f -name '*.apk' | head -n 1)
+
+          if [ -z "$APK" ]; then
+            echo "错误：没有生成 APK"
+            echo "=== 检查 build 目录 ==="
+            find "$ANDROID_PROJECT_ROOT" -type d -name build -print
+            exit 1
+          fi
+
+          echo "找到 APK: $APK"
+
+          mkdir -p output
+
+          cp "$APK" output/Supermercado-Argentina.apk
+
+          echo "APK 已准备完成:"
+          ls -lh output/Supermercado-Argentina.apk
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-         name: Supermercado-Argentina-APK
-         path: project/Supermercado-Argentina.apk
+          name: Supermercado-Argentina-APK
+          path: output/Supermercado-Argentina.apk
+          if-no-files-found: error
